@@ -1,0 +1,1551 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>台灣大亂鬥：布偶擂台賽 - Taiwan Ragdoll Brawl</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Matter.js 2D Physics Engine CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@700;900&display=swap');
+
+    body {
+      font-family: 'Noto Sans TC', system-ui, -apple-system, sans-serif;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      background-color: #090d16;
+      overflow: hidden;
+    }
+
+    /* TV News Broadcast Aesthetics */
+    .news-ticker {
+      animation: ticker 26s linear infinite;
+      white-space: nowrap;
+    }
+    @keyframes ticker {
+      0% { transform: translateX(100%); }
+      100% { transform: translateX(-100%); }
+    }
+
+    .pulse-glow {
+      animation: pulseGlow 1.2s infinite alternate;
+    }
+    @keyframes pulseGlow {
+      from { box-shadow: 0 0 12px rgba(239, 68, 68, 0.6); }
+      to { box-shadow: 0 0 30px rgba(239, 68, 68, 0.95), 0 0 45px rgba(245, 158, 11, 0.85); }
+    }
+
+    .comic-btn {
+      transition: all 0.1s ease;
+      box-shadow: 3px 3px 0px #000;
+    }
+    .comic-btn:active {
+      transform: translate(2px, 2px);
+      box-shadow: 1px 1px 0px #000;
+    }
+
+    /* Floating Comic Hit Damage Popups */
+    .comic-pop {
+      position: absolute;
+      pointer-events: none;
+      font-weight: 900;
+      font-style: italic;
+      text-shadow: 3px 3px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000;
+      animation: popAndFade 0.85s cubic-bezier(0.18, 0.89, 0.32, 1.28) FORWARD;
+      z-index: 50;
+    }
+
+    @keyframes popAndFade {
+      0% { opacity: 0; transform: scale(0.3) translateY(0) rotate(-12deg); }
+      30% { opacity: 1; transform: scale(1.45) translateY(-32px) rotate(6deg); }
+      100% { opacity: 0; transform: scale(1) translateY(-75px) rotate(18deg); }
+    }
+
+    .shake {
+      animation: shake 0.22s cubic-bezier(.36,.07,.19,.97) both;
+    }
+    @keyframes shake {
+      10%, 90% { transform: translate3d(-4px, 0, 0); }
+      20%, 80% { transform: translate3d(6px, 0, 0); }
+      30%, 50%, 70% { transform: translate3d(-8px, 0, 0); }
+      40%, 60% { transform: translate3d(8px, 0, 0); }
+    }
+
+    /* Match Start Countdown Animation */
+    .countdown-pop {
+      animation: countZoom 0.85s ease-out FORWARD;
+    }
+    @keyframes countZoom {
+      0% { transform: scale(0.2); opacity: 0; }
+      50% { transform: scale(1.3); opacity: 1; }
+      100% { transform: scale(1); opacity: 0; }
+    }
+  </style>
+</head>
+<body class="h-screen w-screen flex flex-col items-center justify-between relative select-none">
+
+  <!-- TV Broadcast Header / HUD Top -->
+  <header id="game-hud" class="w-full bg-slate-900 border-b-4 border-yellow-400 p-2 text-white z-20 hidden flex-col">
+    <div class="max-w-4xl mx-auto w-full flex items-center justify-between gap-2">
+      
+      <!-- P1 Health & Info -->
+      <div class="flex-1 flex flex-col items-start">
+        <div class="flex items-center gap-1.5 mb-1">
+          <span class="text-[10px] md:text-xs bg-red-600 px-1.5 py-0.5 rounded font-black">P1 玩家</span>
+          <span id="p1-name-display" class="font-black text-xs md:text-lg text-yellow-400 drop-shadow">咆哮哥</span>
+        </div>
+        <div class="w-full bg-slate-800 border-2 border-black h-5 md:h-7 rounded-full overflow-hidden relative shadow-inner">
+          <div id="p1-hp-fill" class="bg-gradient-to-r from-green-500 to-emerald-400 h-full w-full transition-all duration-100"></div>
+          <span id="p1-hp-text" class="absolute inset-0 flex items-center justify-center text-[10px] md:text-sm font-black drop-shadow-[0_1.2px_1.2px_rgba(0,0,0,0.9)]">250 / 250 HP</span>
+        </div>
+      </div>
+
+      <!-- Center Live Timer & Mode Badge -->
+      <div class="flex flex-col items-center px-2">
+        <div id="mode-badge" class="bg-red-600 text-yellow-300 font-black text-[10px] md:text-xs px-2 py-0.5 rounded border border-black animate-pulse">
+          LIVE 🔴 單人 AI 對決
+        </div>
+        <div id="game-timer" class="font-black text-2xl md:text-4xl text-yellow-400 font-mono drop-shadow-[0_2px_2px_rgba(0,0,0,1)]">
+          90
+        </div>
+      </div>
+
+      <!-- P2 Health & Info -->
+      <div class="flex-1 flex flex-col items-end">
+        <div class="flex items-center gap-1.5 mb-1">
+          <span id="p2-name-display" class="font-black text-xs md:text-lg text-yellow-400 drop-shadow">大餅妹</span>
+          <span id="p2-tag-display" class="text-[10px] md:text-xs bg-blue-600 px-1.5 py-0.5 rounded font-black">AI 對手</span>
+        </div>
+        <div class="w-full bg-slate-800 border-2 border-black h-5 md:h-7 rounded-full overflow-hidden relative shadow-inner">
+          <div id="p2-hp-fill" class="bg-gradient-to-r from-green-500 to-emerald-400 h-full w-full transition-all duration-100"></div>
+          <span id="p2-hp-text" class="absolute inset-0 flex items-center justify-center text-[10px] md:text-sm font-black drop-shadow-[0_1.2px_1.2px_rgba(0,0,0,0.9)]">250 / 250 HP</span>
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- Game Canvas Container (Top-down view) -->
+  <main id="canvas-container" class="relative w-full flex-1 bg-slate-950 overflow-hidden flex items-center justify-center">
+    <canvas id="gameCanvas" class="w-full h-full block cursor-grab active:cursor-grabbing"></canvas>
+
+    <!-- On-screen gesture drag hint overlay -->
+    <div id="touch-hint" class="absolute bottom-4 left-0 right-0 pointer-events-none text-center hidden z-10">
+      <span class="bg-black/80 text-yellow-300 border border-yellow-400/60 px-4 py-1.5 rounded-full text-xs font-bold shadow-lg backdrop-blur">
+        💡 操作提示：在螢幕「任何位置」按住快速滑動，甩動你的角色揮拳擊飛對手！
+      </span>
+    </div>
+
+    <!-- AI Ultimate Trigger Banner Popup -->
+    <div id="ultimate-banner" class="absolute top-1/4 pointer-events-none transform -translate-y-1/2 bg-red-600 text-yellow-300 font-black text-xl md:text-3xl px-8 py-3 rounded-full border-4 border-yellow-400 shadow-2xl opacity-0 transition-all duration-300 scale-50 z-30">
+      ⚡ 對手發動絕招：百萬分貝咆哮衝擊！
+    </div>
+
+    <!-- Match Start 3-2-1 Countdown Overlay -->
+    <div id="countdown-overlay" class="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center pointer-events-none hidden">
+      <div id="countdown-text" class="text-7xl md:text-9xl font-black text-yellow-400 drop-shadow-[0_8px_8px_rgba(0,0,0,1)] tracking-widest">
+        3
+      </div>
+    </div>
+
+    <!-- 2P Room Waiting Overlay -->
+    <div id="room-waiting-modal" class="absolute inset-0 bg-slate-900/95 backdrop-blur-md z-45 flex items-center justify-center p-4 hidden">
+      <div class="bg-slate-800 border-4 border-yellow-400 rounded-3xl p-6 max-w-md w-full text-center flex flex-col items-center gap-4 shadow-2xl pulse-glow">
+        <div class="bg-blue-600 text-white font-black px-4 py-1 rounded-full text-xs animate-pulse">
+          🔑 雙人對決連線等候室 (1/2)
+        </div>
+        <h2 class="text-xl md:text-2xl font-black text-yellow-400">房間代碼：<span id="display-room-code" class="text-3xl text-white font-mono bg-black px-3 py-1 rounded-xl border border-yellow-400">8888</span></h2>
+        
+        <button id="copy-room-code-btn" class="bg-slate-700 hover:bg-slate-600 text-yellow-300 font-bold px-4 py-1.5 rounded-xl border border-slate-500 text-xs comic-btn">
+          📋 點擊複製房間代碼
+        </button>
+
+        <!-- Player Matchup Preview inside waiting interface -->
+        <div class="w-full bg-slate-900/80 border border-slate-700 rounded-2xl p-3 flex items-center justify-around my-1">
+          <div class="flex flex-col items-center">
+            <div id="wait-p1-avatar" class="w-12 h-12 rounded-full border-2 border-yellow-400 bg-amber-500 flex items-center justify-center font-black text-xl text-black">P1</div>
+            <span id="wait-p1-name" class="text-xs font-black text-yellow-300 mt-1">咆哮哥</span>
+            <span class="text-[10px] bg-green-600 text-white px-1.5 py-0.5 rounded font-bold mt-0.5">房主 (已就緒)</span>
+          </div>
+
+          <div class="text-yellow-400 font-black text-xl animate-bounce">VS</div>
+
+          <div class="flex flex-col items-center">
+            <div id="wait-p2-avatar" class="w-12 h-12 rounded-full border-2 border-slate-600 bg-slate-800 flex items-center justify-center font-black text-xl text-slate-500">?</div>
+            <span id="wait-p2-name" class="text-xs font-black text-slate-400 mt-1">等待玩家...</span>
+            <span id="wait-p2-status" class="text-[10px] bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded font-bold mt-0.5">未加入</span>
+          </div>
+        </div>
+
+        <p class="text-slate-300 text-xs md:text-sm font-bold">
+          請將房間代碼傳給朋友，對方選「雙人連線」並輸入代碼即可加入對決！
+        </p>
+
+        <div class="flex items-center gap-2 text-amber-400 font-bold text-sm bg-slate-900 px-4 py-2 rounded-xl border border-slate-700 w-full justify-center">
+          <span class="inline-block w-3 h-3 bg-yellow-400 rounded-full animate-ping"></span>
+          <span id="room-wait-msg">正在等待第二位玩家加入...</span>
+        </div>
+
+        <!-- Mock join trigger for local preview/testing -->
+        <button id="sim-join-btn" class="bg-emerald-600 hover:bg-emerald-500 text-white font-black px-4 py-1.5 rounded-lg text-xs border border-green-300">
+          🤖 (測試) 模擬 P2 玩家加入
+        </button>
+        <button id="cancel-room-btn" class="bg-red-600 hover:bg-red-500 text-white font-black px-6 py-2 rounded-xl comic-btn text-xs">
+          取消連線並返回主選單
+        </button>
+      </div>
+    </div>
+
+    <!-- START / MAIN MENU OVERLAY -->
+    <div id="menu-overlay" class="absolute inset-0 bg-slate-900/95 backdrop-blur-md z-40 flex flex-col items-center justify-between p-4 overflow-y-auto">
+      
+      <!-- Title Logo -->
+      <div class="text-center my-2">
+        <div class="inline-block bg-yellow-400 text-black px-3 py-1 font-black text-xs md:text-sm transform -rotate-1 rounded border-2 border-black shadow">
+          🔥 2026 國會擂台：布偶大亂鬥完整版
+        </div>
+        <h1 class="text-3xl md:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-amber-400 to-yellow-300 tracking-wider my-2 drop-shadow-[0_4px_4px_rgba(0,0,0,0.8)]">
+          台灣大亂鬥：布偶擂台賽
+        </h1>
+        <p class="text-slate-300 text-xs md:text-sm font-bold">螢幕任意位置滑動甩動！包含 AI 自動反抗與自訂相片頭像！</p>
+      </div>
+
+      <!-- Character Selection & Custom Upload -->
+      <div class="w-full max-w-2xl bg-slate-800/90 border-2 border-slate-700 p-4 rounded-2xl flex flex-col gap-3 shadow-xl my-1">
+        <div class="flex items-center justify-between">
+          <h2 class="text-yellow-400 font-black text-sm md:text-base flex items-center gap-1">
+            <span>⚔️ 選擇你的擂台角色</span>
+          </h2>
+          <!-- Custom Photo Upload Button -->
+          <label class="bg-gradient-to-r from-purple-600 to-pink-600 text-white font-black text-xs px-3 py-1.5 rounded-xl border border-pink-400 comic-btn cursor-pointer flex items-center gap-1">
+            <span>📷 上傳自訂相片頭像</span>
+            <input type="file" id="custom-face-input" accept="image/*" class="hidden">
+          </label>
+        </div>
+
+        <!-- Preset Characters Grid -->
+        <div id="character-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+          <!-- Dynamically populated via JS -->
+        </div>
+      </div>
+
+      <!-- AI Difficulty & Game Modes -->
+      <div class="w-full max-w-md bg-slate-800/90 border-2 border-slate-700 p-4 rounded-2xl flex flex-col gap-3 shadow-xl my-1">
+        
+        <!-- Difficulty Selection -->
+        <div class="flex flex-col gap-1.5">
+          <label class="text-xs font-black text-amber-400">🤖 AI 難度設定 (單人模式下電腦會主動甩拳攻擊)：</label>
+          <div class="grid grid-cols-3 gap-2">
+            <button id="diff-easy" class="diff-btn bg-slate-700 text-slate-300 font-black py-1.5 rounded-xl border-2 border-slate-600 text-xs comic-btn">
+              🌱 簡單
+            </button>
+            <button id="diff-normal" class="diff-btn bg-amber-500 text-black font-black py-1.5 rounded-xl border-2 border-yellow-300 text-xs comic-btn">
+              ⚔️ 激戰
+            </button>
+            <button id="diff-hardcore" class="diff-btn bg-slate-700 text-slate-300 font-black py-1.5 rounded-xl border-2 border-slate-600 text-xs comic-btn">
+              🔥 瘋狂咆哮
+            </button>
+          </div>
+        </div>
+
+        <!-- Game Mode Buttons -->
+        <div class="flex gap-2 pt-2 border-t border-slate-700">
+          <button id="mode-1p-btn" class="flex-1 bg-gradient-to-r from-red-600 to-amber-600 text-white font-black py-3 rounded-xl border-2 border-yellow-400 comic-btn text-xs md:text-sm flex items-center justify-center gap-1">
+            <span>👤 單人戰 AI 電腦</span>
+          </button>
+          <button id="mode-2p-toggle-btn" class="flex-1 bg-slate-700 text-slate-200 font-black py-3 rounded-xl border-2 border-slate-500 comic-btn text-xs md:text-sm flex items-center justify-center gap-1">
+            <span>👥 雙人房間連線</span>
+          </button>
+        </div>
+
+        <!-- Room Code Input Area -->
+        <div id="room-controls" class="hidden flex-col gap-2 pt-2 border-t border-slate-700">
+          <div class="text-xs text-slate-300 font-bold text-center">雙人連線模式：點擊建立房間或輸入對手代碼加入</div>
+          <button id="create-room-btn" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-2.5 rounded-xl border-2 border-green-400 comic-btn text-xs">
+            ➕ 建立新房間 (獲取房間碼並直接進入)
+          </button>
+          <div class="flex gap-2 mt-1">
+            <input id="room-code-input" type="text" maxlength="4" placeholder="輸入 4 位碼" class="w-1/2 bg-slate-900 border-2 border-yellow-400 text-yellow-300 text-center font-black text-base rounded-xl p-2 tracking-widest focus:outline-none">
+            <button id="join-room-btn" class="w-1/2 bg-blue-600 hover:bg-blue-500 text-white font-black py-2 rounded-xl border-2 border-blue-400 comic-btn text-xs">
+              🔑 第二人輸入代碼加入
+            </button>
+          </div>
+          <div id="room-status-text" class="text-xs text-center text-amber-400 font-bold h-4"></div>
+        </div>
+      </div>
+
+      <!-- Footer Note -->
+      <div class="text-slate-400 text-[10px] text-center my-1">
+        ※ 本遊戲純屬趣味迷因娛樂創作，所有人物動態與物理碰撞均為趣味模擬。
+      </div>
+
+    </div>
+
+    <!-- VICTORY / RESULTS MODAL OVERLAY -->
+    <div id="victory-modal" class="absolute inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+      <div class="bg-slate-900 border-4 border-yellow-400 rounded-3xl p-5 max-w-md w-full text-center flex flex-col items-center gap-4 shadow-2xl pulse-glow">
+        <div class="bg-red-600 text-yellow-300 font-black px-4 py-1 rounded-full text-xs transform -rotate-2">
+          🏆 擂台對決結果出爐 🏆
+        </div>
+        <h2 id="winner-title" class="text-2xl md:text-4xl font-black text-yellow-400 drop-shadow">
+          咆哮哥 擊敗對手成為擂台之王！
+        </h2>
+
+        <!-- Meme Victory News Card -->
+        <div class="w-full bg-slate-800 border-2 border-slate-600 rounded-2xl p-4 text-left flex flex-col gap-2">
+          <div class="flex justify-between text-xs text-slate-400 font-bold">
+            <span>【國會擂台快報】新聞特報</span>
+            <span id="win-time-stamp">2026/10/22</span>
+          </div>
+          <p id="victory-headline" class="text-sm md:text-base font-black text-white leading-snug">
+            「咆哮哥發動極速離心力與百萬分貝怒吼，成功重創對方血量防線！」
+          </p>
+        </div>
+
+        <div class="flex flex-col w-full gap-2">
+          <button id="share-threads-btn" class="w-full bg-black hover:bg-slate-800 text-white font-black py-3 rounded-xl border-2 border-slate-600 comic-btn flex items-center justify-center gap-2 text-sm">
+            <span>📱 分享戰績 (複製 Threads 文案)</span>
+          </button>
+          <button id="restart-game-btn" class="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-black py-3 rounded-xl border-2 border-green-300 comic-btn text-base">
+            🔄 再來一局擂台賽
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Alert Banner -->
+    <div id="custom-alert" class="absolute top-6 z-50 bg-amber-500 border-2 border-black text-black font-black px-6 py-2.5 rounded-2xl shadow-xl transition-all duration-300 transform -translate-y-20 opacity-0 pointer-events-none text-xs md:text-sm">
+      <span id="custom-alert-msg">提示訊息</span>
+    </div>
+
+  </main>
+
+  <!-- News Ticker Bottom Bar -->
+  <footer id="news-footer" class="w-full bg-red-700 text-yellow-300 font-black py-1 px-2 border-t-4 border-yellow-400 z-20 overflow-hidden flex items-center text-xs md:text-sm">
+    <span class="bg-yellow-400 text-red-900 px-2 py-0.5 font-black rounded mr-2 flex-shrink-0 animate-pulse">即時選情</span>
+    <div class="overflow-hidden w-full relative">
+      <div class="news-ticker inline-block">
+        💥【快訊】2026 國會大亂鬥！兩人到齊自動倒數 3 秒開打！ 🎤【咆哮】咆哮哥發動極速離心力，現場聲量爆表！ ⚡【戰報】大餅妹發動「撕書裂空爪」，擂台繩索火花四濺！ 🎈【現場】發財大師高喊發大財，蚵仔阿北搔頭超越藍綠！
+      </div>
+    </div>
+  </footer>
+
+  <!-- Firebase v11 Script via ESM Modules with Local Storage Fallback -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, getDoc, onSnapshot, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'taiwan-ragdoll-ring-brawl';
+    let db = null;
+    let auth = null;
+
+    if (typeof __firebase_config !== 'undefined') {
+      try {
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        db = getFirestore(app);
+        auth = getAuth(app);
+
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          signInWithCustomToken(auth, __initial_auth_token).catch(() => signInAnonymously(auth));
+        } else {
+          signInAnonymously(auth);
+        }
+      } catch (e) {
+        console.warn("Firebase Init fallback to Local Room Manager:", e);
+      }
+    }
+
+    // Local Storage / In-Memory Fallback Room Store
+    const localRooms = {};
+
+    window.FB_Multiplayer = {
+      isAvailable: () => true,
+      async createRoom(roomCode, p1CharId, onStateChange) {
+        const initialRoom = {
+          status: 'waiting', // waiting (1/2), ready (2/2), playing
+          p1: { charId: p1CharId, hp: 250, maxHp: 250, x: 0, y: 0 },
+          p2: { charId: 'cookie', hp: 250, maxHp: 250, x: 0, y: 0, joined: false },
+          updatedAt: Date.now()
+        };
+
+        if (db) {
+          try {
+            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
+            await setDoc(roomRef, initialRoom);
+            onSnapshot(roomRef, (s) => onStateChange(s.data()), (err) => console.error(err));
+            return { success: true, role: 'p1', roomCode };
+          } catch (err) {
+            console.warn("Firestore error, switching to Local Room:", err);
+          }
+        }
+
+        // Local Memory Fallback
+        localRooms[roomCode] = initialRoom;
+        window.activeLocalRoomListener = onStateChange;
+        onStateChange(initialRoom);
+        return { success: true, role: 'p1', roomCode, isLocal: true };
+      },
+      async joinRoom(roomCode, p2CharId, onStateChange) {
+        if (db) {
+          try {
+            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
+            const snap = await getDoc(roomRef);
+
+            if (snap.exists()) {
+              await updateDoc(roomRef, {
+                status: 'ready',
+                'p2.charId': p2CharId,
+                'p2.joined': true,
+                updatedAt: Date.now()
+              });
+              onSnapshot(roomRef, (s) => onStateChange(s.data()), (err) => console.error(err));
+              return { success: true, role: 'p2', roomCode };
+            }
+          } catch (err) {
+            console.warn("Firestore error on join, trying local fallback:", err);
+          }
+        }
+
+        // Local Fallback Join
+        if (localRooms[roomCode]) {
+          localRooms[roomCode].status = 'ready';
+          localRooms[roomCode].p2.charId = p2CharId;
+          localRooms[roomCode].p2.joined = true;
+          localRooms[roomCode].updatedAt = Date.now();
+
+          if (window.activeLocalRoomListener) window.activeLocalRoomListener(localRooms[roomCode]);
+          onStateChange(localRooms[roomCode]);
+          return { success: true, role: 'p2', roomCode };
+        }
+
+        return { success: false, msg: "找不到此房間代碼，請確認後重試！" };
+      },
+      async updatePos(roomCode, role, state) {
+        if (db) {
+          try {
+            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
+            const updateObj = {};
+            updateObj[role] = state;
+            updateObj.updatedAt = Date.now();
+            await updateDoc(roomRef, updateObj);
+            return;
+          } catch(e){}
+        }
+
+        if (localRooms[roomCode]) {
+          localRooms[roomCode][role] = { ...localRooms[roomCode][role], ...state };
+          if (window.activeLocalRoomListener) window.activeLocalRoomListener(localRooms[roomCode]);
+        }
+      },
+      // Trigger simulated second player join for local testing
+      simulateGuestJoin(roomCode) {
+        if (localRooms[roomCode]) {
+          localRooms[roomCode].status = 'ready';
+          localRooms[roomCode].p2.joined = true;
+          if (window.activeLocalRoomListener) window.activeLocalRoomListener(localRooms[roomCode]);
+        }
+      }
+    };
+  </script>
+
+  <!-- Main Game Engine Logic -->
+  <script>
+    /* ==========================================================================
+       1. WEB AUDIO SYNTHESIZER
+       ========================================================================== */
+    class SoundFX {
+      constructor() { this.ctx = null; }
+      init() {
+        if (!this.ctx) {
+          this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+      }
+      playSlap() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(360, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(45, this.ctx.currentTime + 0.12);
+        gain.gain.setValueAtTime(0.5, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.12);
+        osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.start(); osc.stop(this.ctx.currentTime + 0.12);
+      }
+      playHeavyHit() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(180, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(25, this.ctx.currentTime + 0.28);
+        gain.gain.setValueAtTime(0.85, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.28);
+        osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.start(); osc.stop(this.ctx.currentTime + 0.28);
+      }
+      playBounce() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(130, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(340, this.ctx.currentTime + 0.14);
+        gain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.14);
+        osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.start(); osc.stop(this.ctx.currentTime + 0.14);
+      }
+      playCountdownBeep(isFinal) {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(isFinal ? 880 : 440, this.ctx.currentTime);
+        gain.gain.setValueAtTime(0.5, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.25);
+        osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.start(); osc.stop(this.ctx.currentTime + 0.25);
+      }
+      playUltimateCharge() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(160, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(750, this.ctx.currentTime + 0.45);
+        gain.gain.setValueAtTime(0.6, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.45);
+        osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.start(); osc.stop(this.ctx.currentTime + 0.45);
+      }
+      playVictory() {
+        if (!this.ctx) return;
+        const notes = [261.63, 329.63, 392.00, 523.25, 659.25];
+        notes.forEach((freq, idx) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          const start = this.ctx.currentTime + idx * 0.1;
+          gain.gain.setValueAtTime(0.4, start);
+          gain.gain.exponentialRampToValueAtTime(0.01, start + 0.35);
+          osc.connect(gain); gain.connect(this.ctx.destination);
+          osc.start(start); osc.stop(start + 0.35);
+        });
+      }
+    }
+    const audioSynth = new SoundFX();
+
+    /* ==========================================================================
+       2. CHARACTERS ROSTER & ULTIMATE SKILLS
+       ========================================================================== */
+    const CHARACTERS = {
+      yeller: {
+        id: 'yeller',
+        name: '咆哮哥',
+        subtitle: '咆哮狂戰士',
+        color: '#f59e0b',
+        gloveColor: '#ef4444',
+        ultName: '百萬分貝咆哮衝擊',
+        headline: '發動百萬分貝咆哮衝擊，將對方徹底震撼擊飛！',
+        customImage: null
+      },
+      cookie: {
+        id: 'cookie',
+        name: '大餅妹',
+        subtitle: '撕書裂空戰將',
+        color: '#ec4899',
+        gloveColor: '#be185d',
+        ultName: '撕書裂空爪',
+        headline: '發動「撕書裂空爪」，撕毀對手血量防線！',
+        customImage: null
+      },
+      master: {
+        id: 'master',
+        name: '發財大師',
+        subtitle: '高雄高雄發大財',
+        color: '#3b82f6',
+        gloveColor: '#0284c7',
+        ultName: '金幣發財狂風暴',
+        headline: '發射金幣離心力風暴，成功把對方打進發財防線！',
+        customImage: null
+      },
+      doctor: {
+        id: 'doctor',
+        name: '蚵仔阿北',
+        subtitle: '超越藍綠醫師',
+        color: '#10b981',
+        gloveColor: '#059669',
+        ultName: '超越藍綠幻影步',
+        headline: '搔頭發動超越藍綠幻影步，以高熱量便當拳重創對手！',
+        customImage: null
+      },
+      spicy: {
+        id: 'spicy',
+        name: '辣台妹',
+        subtitle: '貓派抗彈陣線',
+        color: '#8b5cf6',
+        gloveColor: '#6d28d9',
+        ultName: '辣台貓爪陣線突擊',
+        headline: '揮動辣台貓爪極速重拳，精準擊潰對手！',
+        customImage: null
+      },
+      custom: {
+        id: 'custom',
+        name: '自訂選手',
+        subtitle: '相片戰將',
+        color: '#a855f7',
+        gloveColor: '#9333ea',
+        ultName: '相片超能衝擊',
+        headline: '帶著相片頭像帥氣登場，登頂擂台之王！',
+        customImage: null
+      }
+    };
+
+    const COMIC_WORDS = ["咆哮！", "退回！", "違憲！", "假新聞！", "超越藍綠！", "太過分了！", "撕毀法案！", "違法開會！", "反抗！"];
+
+    /* ==========================================================================
+       3. MATTER.JS TOP-DOWN PHYSICS ENGINE
+       ========================================================================== */
+    const Engine = Matter.Engine,
+          World = Matter.World,
+          Bodies = Matter.Bodies,
+          Body = Matter.Body,
+          Constraint = Matter.Constraint,
+          Composite = Matter.Composite,
+          Events = Matter.Events;
+
+    let engine, world;
+    let canvas, ctx;
+    let p1Ragdoll, p2Ragdoll;
+
+    // Arena Ring Dimensions
+    let arenaCenter = { x: 0, y: 0 };
+    let arenaRadius = 260;
+
+    // Gesture State for Relative Drag Anywhere
+    let isDragging = false;
+    let lastPointerPos = { x: 0, y: 0 };
+
+    // Game Lifecycle State
+    let gameActive = false;
+    let gameTimer = 90;
+    let timerInterval = null;
+    let gameMode = '1P';
+    let aiDifficulty = 'normal';
+    let myRole = 'p1';
+    let roomCode = '';
+    let isMatchStarting = false;
+
+    let selectedP1Char = 'yeller';
+    let selectedP2Char = 'cookie';
+
+    // Particle FX
+    let particles = [];
+
+    function initEngine() {
+      canvas = document.getElementById('gameCanvas');
+      ctx = canvas.getContext('2d');
+
+      const container = document.getElementById('canvas-container');
+      canvas.width = container.clientWidth;
+      canvas.height = container.clientHeight;
+
+      arenaCenter = { x: canvas.width / 2, y: canvas.height / 2 };
+      arenaRadius = Math.min(canvas.width, canvas.height) * 0.38;
+
+      // Top-Down Zero Gravity Physics
+      engine = Engine.create({
+        gravity: { x: 0, y: 0 }
+      });
+      world = engine.world;
+
+      // Collision Handler
+      Events.on(engine, 'collisionStart', (event) => {
+        if (!gameActive) return;
+
+        event.pairs.forEach(pair => {
+          const { bodyA, bodyB } = pair;
+
+          let p1Hand = isHandPart(bodyA, p1Ragdoll) ? bodyA : (isHandPart(bodyB, p1Ragdoll) ? bodyB : null);
+          let p2Body = isRagdollPart(bodyA, p2Ragdoll) ? bodyA : (isRagdollPart(bodyB, p2Ragdoll) ? bodyB : null);
+
+          let p2Hand = isHandPart(bodyA, p2Ragdoll) ? bodyA : (isHandPart(bodyB, p2Ragdoll) ? bodyB : null);
+          let p1Body = isRagdollPart(bodyA, p1Ragdoll) ? bodyA : (isRagdollPart(bodyB, p1Ragdoll) ? bodyB : null);
+
+          // P1 hits P2
+          if (p1Hand && p2Body) {
+            const speed = Math.hypot(p1Hand.velocity.x, p1Hand.velocity.y);
+            if (speed > 1.2) {
+              const damage = Math.min(Math.floor(speed * 1.5), 10);
+              applyDamage(p2Ragdoll, damage);
+              triggerHitEffects(p2Body.position.x, p2Body.position.y, damage);
+              if (gameMode === '1P') triggerAICounterAttack(p2Ragdoll, p1Ragdoll);
+            }
+          }
+
+          // P2 hits P1
+          if (p2Hand && p1Body) {
+            const speed = Math.hypot(p2Hand.velocity.x, p2Hand.velocity.y);
+            if (speed > 1.2) {
+              const damage = Math.min(Math.floor(speed * 1.5), 10);
+              applyDamage(p1Ragdoll, damage);
+              triggerHitEffects(p1Body.position.x, p1Body.position.y, damage);
+            }
+          }
+        });
+      });
+
+      window.addEventListener('resize', () => {
+        const container = document.getElementById('canvas-container');
+        canvas.width = container.clientWidth;
+        canvas.height = container.clientHeight;
+        arenaCenter = { x: canvas.width / 2, y: canvas.height / 2 };
+        arenaRadius = Math.min(canvas.width, canvas.height) * 0.38;
+      });
+
+      setupRelativeDragControls();
+      requestAnimationFrame(renderLoop);
+    }
+
+    function isRagdollPart(body, ragdoll) {
+      if (!ragdoll) return false;
+      return Object.values(ragdoll.parts).includes(body);
+    }
+
+    function isHandPart(body, ragdoll) {
+      if (!ragdoll) return false;
+      return body === ragdoll.parts.leftGlove || body === ragdoll.parts.rightGlove;
+    }
+
+    /* Create Overhead 2D Ragdoll Puppet */
+    function createTopDownRagdoll(x, y, charConfig, playerKey) {
+      const group = Body.nextGroup(true);
+
+      const headR = 30;
+      const torsoR = 24;
+      const gloveR = 18;
+
+      const head = Bodies.circle(x, y - 25, headR, {
+        collisionFilter: { group },
+        frictionAir: 0.05,
+        density: 0.005,
+        label: 'head'
+      });
+
+      const torso = Bodies.circle(x, y + 10, torsoR, {
+        collisionFilter: { group },
+        frictionAir: 0.05,
+        density: 0.006,
+        label: 'torso'
+      });
+
+      const leftGlove = Bodies.circle(x - 45, y + 5, gloveR, {
+        frictionAir: 0.03,
+        restitution: 0.9,
+        density: 0.012,
+        label: 'hand'
+      });
+
+      const rightGlove = Bodies.circle(x + 45, y + 5, gloveR, {
+        frictionAir: 0.03,
+        restitution: 0.9,
+        density: 0.012,
+        label: 'hand'
+      });
+
+      const neck = Constraint.create({
+        bodyA: head, bodyB: torso,
+        stiffness: 0.4, damping: 0.1,
+        render: { visible: false }
+      });
+
+      const leftArm = Constraint.create({
+        bodyA: torso, bodyB: leftGlove,
+        stiffness: 0.3, damping: 0.05,
+        length: 50,
+        render: { visible: false }
+      });
+
+      const rightArm = Constraint.create({
+        bodyA: torso, bodyB: rightGlove,
+        stiffness: 0.3, damping: 0.05,
+        length: 50,
+        render: { visible: false }
+      });
+
+      const composite = Composite.create();
+      Composite.add(composite, [head, torso, leftGlove, rightGlove, neck, leftArm, rightArm]);
+      World.add(world, composite);
+
+      return {
+        composite,
+        playerKey,
+        config: charConfig,
+        hp: 250,
+        maxHp: 250,
+        parts: { head, torso, leftGlove, rightGlove },
+        headR, torsoR, gloveR,
+        isUlting: false
+      };
+    }
+
+    /* ==========================================================================
+       4. RELATIVE DRAG CONTROLS (FULL SCREEN SLINGSHOT)
+       ========================================================================== */
+    function setupRelativeDragControls() {
+      function getPos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return { x: clientX - rect.left, y: clientY - rect.top };
+      }
+
+      function handleStart(e) {
+        if (!gameActive) return;
+        audioSynth.init();
+        isDragging = true;
+        lastPointerPos = getPos(e);
+      }
+
+      function handleMove(e) {
+        if (!isDragging || !gameActive) return;
+        const currentPos = getPos(e);
+
+        const dx = currentPos.x - lastPointerPos.x;
+        const dy = currentPos.y - lastPointerPos.y;
+
+        const targetRagdoll = (gameMode === '2P' && myRole === 'p2') ? p2Ragdoll : p1Ragdoll;
+
+        if (targetRagdoll) {
+          const forceMultiplier = 0.0022;
+          Body.applyForce(targetRagdoll.parts.head, targetRagdoll.parts.head.position, {
+            x: dx * forceMultiplier,
+            y: dy * forceMultiplier
+          });
+
+          Body.applyForce(targetRagdoll.parts.leftGlove, targetRagdoll.parts.leftGlove.position, {
+            x: dx * forceMultiplier * 1.8,
+            y: dy * forceMultiplier * 1.8
+          });
+          Body.applyForce(targetRagdoll.parts.rightGlove, targetRagdoll.parts.rightGlove.position, {
+            x: dx * forceMultiplier * 1.8,
+            y: dy * forceMultiplier * 1.8
+          });
+        }
+
+        lastPointerPos = currentPos;
+      }
+
+      function handleEnd() {
+        isDragging = false;
+      }
+
+      canvas.addEventListener('mousedown', handleStart);
+      window.addEventListener('mousemove', handleMove);
+      window.addEventListener('mouseup', handleEnd);
+
+      canvas.addEventListener('touchstart', handleStart, { passive: true });
+      window.addEventListener('touchmove', handleMove, { passive: true });
+      window.addEventListener('touchend', handleEnd);
+    }
+
+    /* ==========================================================================
+       5. INTELLIGENT ACTIVE AI COMBAT ENGINE
+       ========================================================================== */
+    let aiStateTimer = 0;
+
+    function updateActiveAI() {
+      if (gameMode !== '1P' || !gameActive || !p2Ragdoll || !p1Ragdoll) return;
+
+      const ai = p2Ragdoll;
+      const target = p1Ragdoll;
+      const aiHead = ai.parts.head;
+      const targetTorso = target.parts.torso;
+
+      aiStateTimer++;
+
+      let speedMult = 0.0035;
+      let ultFreq = 360;
+
+      if (aiDifficulty === 'easy') {
+        speedMult = 0.002;
+        ultFreq = 600;
+      } else if (aiDifficulty === 'hardcore') {
+        speedMult = 0.0055;
+        ultFreq = 240;
+      }
+
+      const targetVel = targetTorso.velocity;
+      const predictLead = aiDifficulty === 'hardcore' ? 10 : 5;
+      const predictedX = targetTorso.position.x + targetVel.x * predictLead;
+      const predictedY = targetTorso.position.y + targetVel.y * predictLead;
+
+      const dx = predictedX - aiHead.position.x;
+      const dy = predictedY - aiHead.position.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (ai.hp < 35 && (aiStateTimer % 90 < 30)) {
+        const orbitAngle = Math.atan2(dy, dx) + Math.PI / 2;
+        Body.applyForce(aiHead, aiHead.position, {
+          x: Math.cos(orbitAngle) * speedMult * 1.2,
+          y: Math.sin(orbitAngle) * speedMult * 1.2
+        });
+        return;
+      }
+
+      if (dist > 10) {
+        const dirX = dx / dist;
+        const dirY = dy / dist;
+
+        Body.applyForce(aiHead, aiHead.position, {
+          x: dirX * speedMult,
+          y: dirY * speedMult
+        });
+
+        const swingDir = (aiStateTimer % 30 < 15) ? 1.5 : -1.5;
+        Body.applyForce(ai.parts.leftGlove, ai.parts.leftGlove.position, {
+          x: (dirX + dirY * swingDir) * speedMult * 3.0,
+          y: (dirY - dirX * swingDir) * speedMult * 3.0
+        });
+        Body.applyForce(ai.parts.rightGlove, ai.parts.rightGlove.position, {
+          x: (dirX - dirY * swingDir) * speedMult * 3.0,
+          y: (dirY + dirX * swingDir) * speedMult * 3.0
+        });
+      }
+
+      if (aiStateTimer % ultFreq === 0) {
+        triggerAIUltimate(ai, target);
+      }
+    }
+
+    function triggerAICounterAttack(ai, target) {
+      if (gameMode !== '1P' || !ai || !target) return;
+
+      const chance = aiDifficulty === 'hardcore' ? 0.9 : (aiDifficulty === 'normal' ? 0.6 : 0.2);
+      if (Math.random() < chance) {
+        const dx = target.parts.torso.position.x - ai.parts.head.position.x;
+        const dy = target.parts.torso.position.y - ai.parts.head.position.y;
+        const dist = Math.hypot(dx, dy) || 1;
+
+        Body.applyForce(ai.parts.head, ai.parts.head.position, {
+          x: (dx / dist) * 0.008,
+          y: (dy / dist) * 0.008
+        });
+        Body.applyForce(ai.parts.leftGlove, ai.parts.leftGlove.position, {
+          x: (dx / dist) * 0.012,
+          y: (dy / dist) * 0.012
+        });
+      }
+    }
+
+    function triggerAIUltimate(ai, target) {
+      if (!gameActive || ai.isUlting) return;
+
+      ai.isUlting = true;
+      audioSynth.playUltimateCharge();
+
+      const banner = document.getElementById('ultimate-banner');
+      banner.innerText = `⚡ 對手發動絕招：${ai.config.ultName}！`;
+      banner.classList.remove('opacity-0', 'scale-50');
+      banner.classList.add('opacity-100', 'scale-100');
+
+      setTimeout(() => {
+        banner.classList.remove('opacity-100', 'scale-100');
+        banner.classList.add('opacity-0', 'scale-50');
+      }, 1600);
+
+      const dx = target.parts.torso.position.x - ai.parts.head.position.x;
+      const dy = target.parts.torso.position.y - ai.parts.head.position.y;
+      const dist = Math.hypot(dx, dy) || 1;
+
+      for (let i = 0; i < 3; i++) {
+        setTimeout(() => {
+          if (!gameActive) return;
+          Body.applyForce(ai.parts.head, ai.parts.head.position, {
+            x: (dx / dist) * 0.012,
+            y: (dy / dist) * 0.012
+          });
+          Body.applyForce(ai.parts.leftGlove, ai.parts.leftGlove.position, {
+            x: (dx / dist) * 0.02,
+            y: (dy / dist) * 0.02
+          });
+          Body.applyForce(ai.parts.rightGlove, ai.parts.rightGlove.position, {
+            x: (dx / dist) * 0.02,
+            y: (dy / dist) * 0.02
+          });
+          spawnSparkParticles(ai.parts.head.position.x, ai.parts.head.position.y);
+        }, i * 150);
+      }
+
+      setTimeout(() => { ai.isUlting = false; }, 2000);
+    }
+
+    /* ==========================================================================
+       6. ARENA BOUNDARY & IMPACT EFFECTS
+       ========================================================================== */
+    function checkArenaRingBoundaries(ragdoll) {
+      if (!ragdoll) return;
+
+      Object.values(ragdoll.parts).forEach(part => {
+        const dist = Math.hypot(part.position.x - arenaCenter.x, part.position.y - arenaCenter.y);
+        
+        if (dist > arenaRadius - 15) {
+          const angle = Math.atan2(part.position.y - arenaCenter.y, part.position.x - arenaCenter.x);
+          
+          Body.applyForce(part, part.position, {
+            x: -Math.cos(angle) * 0.018,
+            y: -Math.sin(angle) * 0.018
+          });
+
+          audioSynth.playBounce();
+          spawnSparkParticles(part.position.x, part.position.y);
+
+          if (part.label === 'head' || part.label === 'torso') {
+            applyDamage(ragdoll, 0.2);
+          }
+        }
+      });
+    }
+
+    function applyDamage(targetRagdoll, amount) {
+      if (!targetRagdoll || targetRagdoll.hp <= 0) return;
+      targetRagdoll.hp = Math.max(0, targetRagdoll.hp - amount);
+      updateHUD();
+      audioSynth.playSlap();
+
+      if (targetRagdoll.hp <= 0) {
+        const winner = targetRagdoll === p1Ragdoll ? 'p2' : 'p1';
+        endGame(winner);
+      }
+    }
+
+    function triggerHitEffects(x, y, damage) {
+      const container = document.querySelector('main');
+      container.classList.add('shake');
+      setTimeout(() => container.classList.remove('shake'), 220);
+
+      audioSynth.playHeavyHit();
+      spawnSparkParticles(x, y);
+
+      const pop = document.createElement('div');
+      pop.className = 'comic-pop text-yellow-300 text-lg md:text-2xl';
+      pop.innerText = `${COMIC_WORDS[Math.floor(Math.random() * COMIC_WORDS.length)]} -${damage}`;
+      pop.style.left = `${x}px`;
+      pop.style.top = `${y}px`;
+      document.getElementById('canvas-container').appendChild(pop);
+      setTimeout(() => pop.remove(), 850);
+    }
+
+    function spawnSparkParticles(x, y) {
+      for (let i = 0; i < 8; i++) {
+        particles.push({
+          x, y,
+          vx: (Math.random() - 0.5) * 8,
+          vy: (Math.random() - 0.5) * 8,
+          life: 1.0,
+          color: Math.random() > 0.5 ? '#f59e0b' : '#ef4444'
+        });
+      }
+    }
+
+    function updateAndDrawParticles() {
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= 0.05;
+
+        if (p.life <= 0) {
+          particles.splice(i, 1);
+          continue;
+        }
+
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3.5 * p.life, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+      }
+    }
+
+    /* ==========================================================================
+       7. RENDERING LOOP & CANVAS DRAWING
+       ========================================================================== */
+    function renderLoop() {
+      if (engine) Engine.update(engine, 1000 / 60);
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      drawArenaRing();
+
+      if (p1Ragdoll) checkArenaRingBoundaries(p1Ragdoll);
+      if (p2Ragdoll) checkArenaRingBoundaries(p2Ragdoll);
+
+      if (p1Ragdoll) drawTopDownRagdoll(p1Ragdoll);
+      if (p2Ragdoll) drawTopDownRagdoll(p2Ragdoll);
+
+      updateAndDrawParticles();
+      updateActiveAI();
+
+      if (gameMode === '2P' && gameActive) {
+        syncMultiplayerState();
+      }
+
+      requestAnimationFrame(renderLoop);
+    }
+
+    function drawArenaRing() {
+      ctx.fillStyle = '#090d16';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.beginPath();
+      ctx.arc(arenaCenter.x, arenaCenter.y, arenaRadius, 0, Math.PI * 2);
+      ctx.fillStyle = '#1e293b';
+      ctx.fill();
+      ctx.lineWidth = 14;
+      ctx.strokeStyle = '#f59e0b';
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(arenaCenter.x, arenaCenter.y, arenaRadius * 0.65, 0, Math.PI * 2);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#334155';
+      ctx.stroke();
+
+      ctx.fillStyle = '#475569';
+      ctx.font = '900 16px "Noto Sans TC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText("🏛️ 2026 國會大擂台 (兩人到齊倒數開打) 🏛️", arenaCenter.x, arenaCenter.y);
+    }
+
+    function drawTopDownRagdoll(ragdoll) {
+      const parts = ragdoll.parts;
+      const cfg = ragdoll.config;
+
+      ctx.beginPath();
+      ctx.moveTo(parts.torso.position.x, parts.torso.position.y);
+      ctx.lineTo(parts.leftGlove.position.x, parts.leftGlove.position.y);
+      ctx.moveTo(parts.torso.position.x, parts.torso.position.y);
+      ctx.lineTo(parts.rightGlove.position.x, parts.rightGlove.position.y);
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = '#000';
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(parts.torso.position.x, parts.torso.position.y, ragdoll.torsoR, 0, Math.PI * 2);
+      ctx.fillStyle = cfg.color;
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#000';
+      ctx.stroke();
+
+      [parts.leftGlove, parts.rightGlove].forEach(glove => {
+        ctx.beginPath();
+        ctx.arc(glove.position.x, glove.position.y, ragdoll.gloveR, 0, Math.PI * 2);
+        ctx.fillStyle = ragdoll.isUlting ? '#ef4444' : cfg.gloveColor;
+        ctx.fill();
+        ctx.lineWidth = 3.5;
+        ctx.strokeStyle = '#000';
+        ctx.stroke();
+      });
+
+      const head = parts.head;
+      ctx.save();
+      ctx.translate(head.position.x, head.position.y);
+      ctx.rotate(head.angle);
+
+      const r = ragdoll.headR;
+
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.clip();
+
+      if (cfg.customImage) {
+        ctx.drawImage(cfg.customImage, -r, -r, r * 2, r * 2);
+      } else {
+        ctx.fillStyle = '#fde047';
+        ctx.fillRect(-r, -r, r * 2, r * 2);
+
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.arc(-8, -6, 4, 0, Math.PI * 2);
+        ctx.arc(8, -6, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.arc(0, 8, 10, 0, Math.PI);
+        ctx.fill();
+      }
+
+      ctx.restore();
+
+      ctx.beginPath();
+      ctx.arc(head.position.x, head.position.y, r, 0, Math.PI * 2);
+      ctx.lineWidth = ragdoll.isUlting ? 6 : 3.5;
+      ctx.strokeStyle = ragdoll.isUlting ? '#ef4444' : '#000';
+      ctx.stroke();
+    }
+
+    /* ==========================================================================
+       8. MULTIPLAYER SYNC & 2-PLAYER COUNTDOWN
+       ========================================================================== */
+    let lastSyncTime = 0;
+
+    function syncMultiplayerState() {
+      const now = Date.now();
+      if (now - lastSyncTime < 60) return;
+      lastSyncTime = now;
+
+      const myRagdoll = myRole === 'p1' ? p1Ragdoll : p2Ragdoll;
+      if (!myRagdoll || !window.FB_Multiplayer || !roomCode) return;
+
+      const state = {
+        hp: myRagdoll.hp,
+        x: Math.round(myRagdoll.parts.torso.position.x),
+        y: Math.round(myRagdoll.parts.torso.position.y)
+      };
+
+      window.FB_Multiplayer.updatePos(roomCode, myRole, state);
+    }
+
+    function onRemoteRoomUpdate(data) {
+      if (!data) return;
+
+      // Rule: When Room becomes 'ready' (both P1 and P2 in room)
+      if (data.status === 'ready' && !isMatchStarting && !gameActive) {
+        document.getElementById('room-waiting-modal').classList.add('hidden');
+        if (data.p2 && data.p2.charId) selectedP2Char = data.p2.charId;
+        startMatchSequence();
+      }
+
+      if (data.status === 'playing' && gameActive) {
+        const remoteRole = myRole === 'p1' ? 'p2' : 'p1';
+        const remoteRagdoll = remoteRole === 'p1' ? p1Ragdoll : p2Ragdoll;
+        const remoteState = data[remoteRole];
+
+        if (remoteRagdoll && remoteState) {
+          remoteRagdoll.hp = remoteState.hp;
+          updateHUD();
+          if (remoteState.x && remoteState.y) {
+            Body.setPosition(remoteRagdoll.parts.torso, { x: remoteState.x, y: remoteState.y });
+          }
+        }
+      }
+    }
+
+    /* Synchronized 3-2-1 Match Start Sequence */
+    function startMatchSequence() {
+      isMatchStarting = true;
+      document.getElementById('menu-overlay').classList.add('hidden');
+      document.getElementById('game-hud').classList.remove('hidden');
+      document.getElementById('game-hud').classList.add('flex');
+      document.getElementById('touch-hint').classList.remove('hidden');
+
+      document.getElementById('p1-name-display').innerText = CHARACTERS[selectedP1Char].name;
+      document.getElementById('p2-name-display').innerText = CHARACTERS[selectedP2Char].name;
+      document.getElementById('p2-tag-display').innerText = gameMode === '1P' ? 'AI 對手' : 'P2 玩家';
+      document.getElementById('mode-badge').innerText = gameMode === '1P' ? `LIVE 🔴 AI (${aiDifficulty})` : `LIVE 🔴 雙人連線對決`;
+
+      if (p1Ragdoll) Composite.remove(world, p1Ragdoll.composite);
+      if (p2Ragdoll) Composite.remove(world, p2Ragdoll.composite);
+
+      p1Ragdoll = createTopDownRagdoll(arenaCenter.x - 90, arenaCenter.y, CHARACTERS[selectedP1Char], 'p1');
+      p2Ragdoll = createTopDownRagdoll(arenaCenter.x + 90, arenaCenter.y, CHARACTERS[selectedP2Char], 'p2');
+
+      updateHUD();
+
+      // Trigger 3-2-1 Countdown Overlay
+      const countdownOverlay = document.getElementById('countdown-overlay');
+      const countdownText = document.getElementById('countdown-text');
+      countdownOverlay.classList.remove('hidden');
+
+      let count = 3;
+      countdownText.innerText = count;
+      countdownText.className = "text-7xl md:text-9xl font-black text-yellow-400 countdown-pop";
+      audioSynth.playCountdownBeep(false);
+
+      const countInterval = setInterval(() => {
+        count--;
+        if (count > 0) {
+          countdownText.innerText = count;
+          countdownText.className = "text-7xl md:text-9xl font-black text-yellow-400 countdown-pop";
+          audioSynth.playCountdownBeep(false);
+        } else if (count === 0) {
+          countdownText.innerText = "開打！";
+          countdownText.className = "text-6xl md:text-8xl font-black text-red-500 countdown-pop";
+          audioSynth.playCountdownBeep(true);
+        } else {
+          clearInterval(countInterval);
+          countdownOverlay.classList.add('hidden');
+          isMatchStarting = false;
+          gameActive = true;
+          startRoundTimer();
+        }
+      }, 950);
+    }
+
+    function startRoundTimer() {
+      gameTimer = 90;
+      document.getElementById('game-timer').innerText = gameTimer;
+
+      clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        if (!gameActive) return;
+        gameTimer--;
+        document.getElementById('game-timer').innerText = gameTimer;
+
+        if (gameTimer <= 0) {
+          const winner = p1Ragdoll.hp >= p2Ragdoll.hp ? 'p1' : 'p2';
+          endGame(winner);
+        }
+      }, 1000);
+    }
+
+    /* ==========================================================================
+       9. UI & GAME CONTROLLERS
+       ========================================================================== */
+    function renderCharacterSelectionGrid() {
+      const grid = document.getElementById('character-grid');
+      grid.innerHTML = '';
+
+      Object.values(CHARACTERS).forEach(char => {
+        const isP1Selected = selectedP1Char === char.id;
+        const card = document.createElement('div');
+        card.className = `cursor-pointer rounded-2xl p-2 border-4 transition-all flex flex-col items-center justify-between text-center ${
+          isP1Selected ? 'bg-amber-500/20 border-yellow-400 scale-105 shadow-lg' : 'bg-slate-800/80 border-slate-700 hover:border-slate-500'
+        }`;
+
+        card.onclick = () => {
+          selectedP1Char = char.id;
+          const keys = Object.keys(CHARACTERS).filter(k => k !== char.id);
+          selectedP2Char = keys[Math.floor(Math.random() * keys.length)];
+          renderCharacterSelectionGrid();
+          audioSynth.init();
+          audioSynth.playSlap();
+        };
+
+        let avatarContent = `<div class="w-10 h-10 rounded-full flex items-center justify-center font-black text-lg border-2 border-black mb-1" style="background-color: ${char.color}">${char.name[0]}</div>`;
+        
+        if (char.customImage) {
+          avatarContent = `<div class="w-10 h-10 rounded-full border-2 border-black mb-1 overflow-hidden"><img src="${char.customImage.src}" class="w-full h-full object-cover"></div>`;
+        }
+
+        card.innerHTML = `
+          ${avatarContent}
+          <div class="font-black text-xs text-yellow-300">${char.name}</div>
+          <div class="text-[9px] text-slate-300 font-bold">${char.subtitle}</div>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    function setupDifficultyButtons() {
+      const easyBtn = document.getElementById('diff-easy');
+      const normalBtn = document.getElementById('diff-normal');
+      const hardcoreBtn = document.getElementById('diff-hardcore');
+
+      function setDiff(d) {
+        aiDifficulty = d;
+        [easyBtn, normalBtn, hardcoreBtn].forEach(b => {
+          b.className = "diff-btn bg-slate-700 text-slate-300 font-black py-1.5 rounded-xl border-2 border-slate-600 text-xs comic-btn";
+        });
+
+        if (d === 'easy') {
+          easyBtn.className = "diff-btn bg-green-500 text-black font-black py-1.5 rounded-xl border-2 border-green-300 text-xs comic-btn";
+        } else if (d === 'normal') {
+          normalBtn.className = "diff-btn bg-amber-500 text-black font-black py-1.5 rounded-xl border-2 border-yellow-300 text-xs comic-btn";
+        } else {
+          hardcoreBtn.className = "diff-btn bg-red-600 text-white font-black py-1.5 rounded-xl border-2 border-red-300 text-xs comic-btn animate-pulse";
+        }
+      }
+
+      easyBtn.onclick = () => setDiff('easy');
+      normalBtn.onclick = () => setDiff('normal');
+      hardcoreBtn.onclick = () => setDiff('hardcore');
+    }
+
+    function updateHUD() {
+      if (!p1Ragdoll || !p2Ragdoll) return;
+      const p1Pct = Math.max(0, (p1Ragdoll.hp / p1Ragdoll.maxHp) * 100);
+      const p2Pct = Math.max(0, (p2Ragdoll.hp / p2Ragdoll.maxHp) * 100);
+
+      document.getElementById('p1-hp-fill').style.width = `${p1Pct}%`;
+      document.getElementById('p1-hp-text').innerText = `${Math.ceil(p1Ragdoll.hp)} / ${p1Ragdoll.maxHp} HP`;
+
+      document.getElementById('p2-hp-fill').style.width = `${p2Pct}%`;
+      document.getElementById('p2-hp-text').innerText = `${Math.ceil(p2Ragdoll.hp)} / ${p2Ragdoll.maxHp} HP`;
+    }
+
+    function endGame(winnerKey) {
+      gameActive = false;
+      clearInterval(timerInterval);
+
+      const winnerRagdoll = winnerKey === 'p1' ? p1Ragdoll : p2Ragdoll;
+      audioSynth.playVictory();
+
+      document.getElementById('winner-title').innerText = `🎉 ${winnerRagdoll.config.name} 擊敗對手登頂擂台之王！`;
+      document.getElementById('victory-headline').innerText = `「${winnerRagdoll.config.name} ${winnerRagdoll.config.headline}」`;
+      document.getElementById('win-time-stamp').innerText = new Date().toLocaleDateString('zh-TW');
+
+      document.getElementById('victory-modal').classList.remove('hidden');
+    }
+
+    function showAlert(msg) {
+      const el = document.getElementById('custom-alert');
+      document.getElementById('custom-alert-msg').innerText = msg;
+      el.classList.remove('-translate-y-20', 'opacity-0');
+      setTimeout(() => el.classList.add('-translate-y-20', 'opacity-0'), 2500);
+    }
+
+    function setupCustomPhotoUpload() {
+      const input = document.getElementById('custom-face-input');
+      input.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const img = new Image();
+          img.onload = () => {
+            CHARACTERS.custom.customImage = img;
+            selectedP1Char = 'custom';
+            renderCharacterSelectionGrid();
+            showAlert("📸 相片頭像上傳成功！已套用至自訂選手！");
+          };
+          img.src = event.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    window.onload = function() {
+      initEngine();
+      setupCustomPhotoUpload();
+      setupDifficultyButtons();
+      renderCharacterSelectionGrid();
+
+      // 1P Single Player against AI
+      document.getElementById('mode-1p-btn').onclick = () => {
+        gameMode = '1P';
+        myRole = 'p1';
+        document.getElementById('room-controls').classList.add('hidden');
+        startMatchSequence();
+      };
+
+      // Toggle 2P Multiplayer Room Panel
+      document.getElementById('mode-2p-toggle-btn').onclick = () => {
+        gameMode = '2P';
+        const ctrl = document.getElementById('room-controls');
+        ctrl.classList.toggle('hidden');
+        ctrl.classList.toggle('flex');
+      };
+
+      // Create 2P Room (Host switches to Waiting Screen immediately)
+      document.getElementById('create-room-btn').onclick = async () => {
+        const generatedCode = Math.floor(1000 + Math.random() * 9000).toString();
+        roomCode = generatedCode;
+        myRole = 'p1';
+
+        document.getElementById('display-room-code').innerText = roomCode;
+        
+        // Update P1 info in waiting modal
+        const charP1 = CHARACTERS[selectedP1Char];
+        document.getElementById('wait-p1-name').innerText = charP1.name;
+        const p1Av = document.getElementById('wait-p1-avatar');
+        if (charP1.customImage) {
+          p1Av.innerHTML = `<img src="${charP1.customImage.src}" class="w-full h-full object-cover rounded-full">`;
+        } else {
+          p1Av.style.backgroundColor = charP1.color;
+          p1Av.innerText = charP1.name[0];
+        }
+
+        // Hide main menu, show waiting room UI
+        document.getElementById('menu-overlay').classList.add('hidden');
+        document.getElementById('room-waiting-modal').classList.remove('hidden');
+
+        const res = await window.FB_Multiplayer.createRoom(roomCode, selectedP1Char, onRemoteRoomUpdate);
+        if (res.success) {
+          showAlert(`🔑 房間代碼 ${roomCode} 已建立！已進入連線等待畫面！`);
+        } else {
+          showAlert(res.msg);
+        }
+      };
+
+      // Copy Room Code Button
+      document.getElementById('copy-room-code-btn').onclick = () => {
+        const dummy = document.createElement('textarea');
+        document.body.appendChild(dummy);
+        dummy.value = roomCode;
+        dummy.select();
+        document.execCommand('copy');
+        document.body.removeChild(dummy);
+        showAlert(`📋 房間代碼 ${roomCode} 已成功複製到剪貼簿！`);
+      };
+
+      // Join 2P Room (Guest inputs room code to join)
+      document.getElementById('join-room-btn').onclick = async () => {
+        const inputCode = document.getElementById('room-code-input').value.trim();
+        if (!inputCode || inputCode.length < 4) {
+          showAlert("請輸入 4 位數房間代碼！");
+          return;
+        }
+
+        roomCode = inputCode;
+        myRole = 'p2';
+        document.getElementById('room-status-text').innerText = "⏳ 正在加入房間...";
+
+        const res = await window.FB_Multiplayer.joinRoom(roomCode, selectedP1Char, onRemoteRoomUpdate);
+        if (res.success) {
+          document.getElementById('room-status-text').innerText = "✅ 成功加入！準備開打！";
+          document.getElementById('menu-overlay').classList.add('hidden');
+        } else {
+          document.getElementById('room-status-text').innerText = `❌ ${res.msg}`;
+          showAlert(res.msg);
+        }
+      };
+
+      // Simulated Guest Join for testing inside single browser window
+      document.getElementById('sim-join-btn').onclick = () => {
+        window.FB_Multiplayer.simulateGuestJoin(roomCode);
+      };
+
+      // Cancel Room Waiting and return to main menu
+      document.getElementById('cancel-room-btn').onclick = () => {
+        document.getElementById('room-waiting-modal').classList.add('hidden');
+        document.getElementById('menu-overlay').classList.remove('hidden');
+      };
+
+      // Share Threads Result Text
+      document.getElementById('share-threads-btn').onclick = () => {
+        const headline = document.getElementById('victory-headline').innerText;
+        const textToCopy = `【台灣大亂鬥：布偶擂台賽戰報】\n${headline}\n快來跟我一起上傳照片進行擂台對決！🔥 #台灣大亂鬥 #Threads擂台賽`;
+
+        const dummy = document.createElement('textarea');
+        document.body.appendChild(dummy);
+        dummy.value = textToCopy;
+        dummy.select();
+        document.execCommand('copy');
+        document.body.removeChild(dummy);
+
+        showAlert("📋 戰績文案已複製！快貼到 Threads / IG 分享吧！");
+      };
+
+      // Restart Game
+      document.getElementById('restart-game-btn').onclick = () => {
+        document.getElementById('victory-modal').classList.add('hidden');
+        document.getElementById('menu-overlay').classList.remove('hidden');
+      };
+    };
+  </script>
+</body>
+</html>
